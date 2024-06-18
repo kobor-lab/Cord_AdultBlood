@@ -1,0 +1,409 @@
+#Two adult datasets: 
+  
+ # https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5975716/
+ # https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0041361
+  
+#Four cord blood datasets:
+    
+  #https://www.ncbi.nlm.nih.gov/pubmed/27019159
+  #https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6712867/
+  #https://link.springer.com/article/10.1186/s13148-015-0129-6
+  #https://www.ncbi.nlm.nih.gov/pubmed/30232931
+  
+# 1.0 PCA
+  
+  ```{r PCA}
+  
+  #assign colors
+  myColors <- c("cadetblue4", "cadetblue3",
+                "deepskyblue4",  "deepskyblue3",  
+                "green4",  "green3",
+                "darkolivegreen4",  "darkolivegreen3",
+                "brown4",  "brown3",
+                "chocolate3",  "chocolate1",
+                "darkorchid4")
+  
+  color_possibilities<-c("NK.Adult","NK.Cord",
+                         "B.Adult","B.Cord",
+                         "CD4T.Adult","CD4T.Cord",
+                         "CD8T.Adult","CD8T.Cord",
+                         "G.Adult","G.Cord",
+                         "Mo.Adult","Mo.Cord",
+                         "RBC.Cord")
+  
+  names(myColors) <- color_possibilities
+  
+  betas <-  sorted
+  colnames(betas)<- paste(all.sort$Tissue, all.sort$Age, sep=" ")
+  
+  
+  pca<- prcomp(t(sorted), center=T, scale=F)
+  scores<- pca$x
+  probes<- pca$rotation[,1:6]
+  
+
+  sco<- cbind(id=as.factor(rownames(scores)), scores[,1:8], all.sort[,c("Age","Tissue")])
+  scores.melt<- melt(sco, id.var=c("id", "Age", "Tissue"))
+  scores.cast<- dcast(scores.melt, id+Age+Tissue~variable, value.var="value")
+  
+  
+  pc12<- ggplot(scores.cast, aes(PC1, PC2, colour=interaction(Tissue, Age)))+
+    geom_point(aes(shape=Age), size=3)+
+    theme_bw()+
+    scale_colour_manual(values=myColors)+
+    theme(legend.position="none")
+  pca34<- ggplot(scores.cast, aes(PC3, PC4, colour=interaction(Tissue, Age)))+
+    geom_point(aes(shape=Age), size=3)+
+    theme_bw()+
+    scale_colour_manual(values=myColors)+
+    theme(legend.position="none")
+  pca56<- ggplot(scores.cast, aes(PC5, PC6, colour=interaction(Tissue, Age)))+
+    geom_point(aes(shape=Age), size=3)+
+    theme_bw()+
+    scale_colour_manual(values=myColors)+
+    theme(legend.position="none")
+  
+  
+  grid.arrange(pc12, pca34, pca56,   nrow=1)
+  
+  pr.names<- paste(scores.cast$Tissue, scores.cast$Age, sep=".")
+  pairs.col<- unname(myColors[match(pr.names, names(myColors))])
+  
+```
+    
+# 2.0 EWAS
+
+## 2.0a Exemplar EWAS
+```{r Examplar EWAS CD4T}
+# m-values are less heteroschedastic than beta values
+M <- beta2m(betas_CD4T)
+pData <- pDat_CD4T
+mod <-model.matrix(~DevAge, pData)
+fit1 <- lmFit(M, mod)
+colnames(coef(fit1))
+fit2 <- eBayes(fit1)
+tt_CD4T <- topTable(fit2, coef = "DevAgeCordBlood", n = Inf)
+dim(CD4T_hitsFDR <- topTable(fit2, coef="DevAgeCordBlood",adjust.method="fdr", p.value=0.05, number=Inf))
+
+#beta thresholds 
+colnames(betas_CD4T) <- paste(colnames(betas_CD4T),pDat_CD4T$DevAge,sep="_")
+length(AvgAdult <-rowMeans(betas_CD4T[,grep("Adult",colnames(betas_CD4T))],na.rm=TRUE))
+length(AvgCordBlood <-rowMeans(betas_CD4T[,grep("CordBlood",colnames(betas_CD4T))],na.rm=TRUE))
+length(Diff <- AvgAdult-AvgCordBlood)
+Diff <- as.data.frame(Diff)
+Diff$CpG <- rownames(Diff)
+Diff <- Diff[rownames(tt_CD4T),]
+all(rownames(tt_CD4T)==rownames(Diff))
+
+#merge
+CD4Tmerge <- merge(tt_CD4T,Diff, by=0)
+library(plyr)
+CD4Tmerge <- rename(CD4Tmerge,c('Diff'='DelBeta'))
+colnames(CD4Tmerge)
+dim(Pval0.05 <- CD4Tmerge[CD4Tmerge[ ,"adj.P.Val"] < 0.05, ])
+dim(Pval0.05delbeta0.10 <- Pval0.05[abs(Pval0.05[ ,"DelBeta"]) >= 0.10, ])
+dim(Pval <- CD4Tmerge[CD4Tmerge[ ,"P.Value"] < 0.00000009, ])
+dim(Pvaldelbeta0.10_CD4T <- Pval[abs(Pval[ ,"DelBeta"]) >= 0.10, ])
+#save(CD4Tmerge, file= "~/KoborLab/kobor_space/ckonwar/Blood/CD4Tmerge.RData")
+```
+
+## 2.0b volcano CD4T
+```{r volc CD4T}
+dB<-0.10 #delta beta cutoff
+Pv<-0.00000009 #Pvalue cutoff
+#https://bmcgenomics.biomedcentral.com/articles/10.1186/s12864-019-5761-7
+
+data_volc <- CD4Tmerge
+volcano<-data.frame(Adjusted_Pvalue=data_volc$adj.P.Val,pval=data_volc$P.Value, Delta_Beta=data_volc$DelBeta)
+
+color3<-sapply(1:nrow(volcano), function(x) if(volcano$pval[x]<=Pv){
+  
+  if(abs(volcano$Delta_Beta[x])>dB){
+    
+    if(volcano$Delta_Beta[x]>dB){"Increased Methylation\n(with Potential Biological Impact)"}else{"Decreased Methylation\n (with Potential Biological Impact)"}
+    
+  }else{if(volcano$Delta_Beta[x]>0){"Increased Methylation"}else{"Decreased Methylation"}}}else{"Not Significantly Different"})
+
+volcano$Interesting_CpG3<-color3
+
+ggplot(volcano, aes(Delta_Beta, -log10(pval), color=Interesting_CpG3))+
+  geom_point(shape=19, size=1)+theme_bw()+
+  scale_color_manual(values=c(muted("#994d00", l=80, c=30),"#994d00",muted("#004c99", l=70, c=40),"#004c99","grey"))+
+  geom_vline(xintercept=c(-dB,dB), color="grey60")+
+  geom_hline(yintercept=-log10(Pv), color="grey60")+
+  ylab("P Value (-log10)")+
+  xlab("Delta Beta")+
+  xlim(-1, 1)+
+  theme(axis.text = element_text(size =10, color="black"),
+        axis.title = element_text(size =10),
+        legend.position="none" )+
+  ggtitle("CD4T")
+ggsave(file=paste("CD4T", "volcano.png", sep="_"), dpi=800, width=3, height=3, units="in")
+```
+
+# 2.0c Neutrophil and Granulocytes analysis 
+
+#We were unsure if we should be including granulocytes along with the cell types. Really it is a mixture of Neutrophils, Basophils, and Eosinophils. 
+#However, the others - B cells, NK, CD4, CD8 etc also have other subtypes but may be not as well characterized. 
+#It is hard to determine whether the difference between neutrophils and eosinophils/basophils is the same or different than the difference between naive and memory B cells for example. 
+#Anyways we sought to assess whether the methylome of the granulocytes are similar to neutrophils as granulocytes are predominantly neutrophils. 
+#To answer this we will be using the Reinius dataset that has both Granulocytes and Neutrophils data.
+
+```{r Reinius only}
+#Only pull Reinius Lin
+dim(betas_Rei <- betas_filt[,grep("Reinius",colnames(betas_filt))])
+dim(pDat_Rei <- subset(pDat, pDat$Study == "Reinius"))
+
+# only need granulocytes and neutrophils
+dim(betas_ReiNeuGran <- betas_Rei[,grep("Neu|Gran",colnames(betas_Rei))])
+dim(pDat_ReiNeuGran <- subset(pDat_Rei, pDat_Rei$CellType == "Neu"|pDat_Rei$CellType == "Gran"))
+```
+
+```{r Reinius neu gran ewas}
+M <- beta2m(betas_ReiNeuGran)
+pData <- pDat_ReiNeuGran
+mod <-model.matrix(~CellType, pData)
+fit1 <- lmFit(M, mod)
+colnames(coef(fit1))
+fit2 <- eBayes(fit1)
+tt <- topTable(fit2, coef = "CellTypeNeu", n = Inf)
+dim(hitsFDR <- topTable(fit2, coef="CellTypeNeu",adjust.method="fdr", p.value=0.05, number=Inf))
+# only two sites so great yes - granulocytes are largely neutrophils
+
+#beta thresholds 
+length(AvgNeu <-rowMeans(betas_ReiNeuGran[,grep("Neu",colnames(betas_ReiNeuGran))],na.rm=TRUE))
+length(AvgGran <-rowMeans(betas_ReiNeuGran[,grep("Gran",colnames(betas_ReiNeuGran))],na.rm=TRUE))
+length(Diff <- AvgNeu-AvgGran)
+Diff <- as.data.frame(Diff)
+Diff$CpG <- rownames(Diff)
+Diff <- Diff[rownames(tt),]
+all(rownames(tt)==rownames(Diff))
+
+#merge
+NeuGranmerge <- merge(tt,Diff, by=0)
+library(plyr)
+NeuGranmerge <- rename(NeuGranmerge,c('Diff'='DelBeta'))
+colnames(NeuGranmerge)
+dim(Pval0.05 <- NeuGranmerge[NeuGranmerge[ ,"adj.P.Val"] < 0.05, ])
+dim(Pval0.05delbeta0.10 <- Pval0.05[abs(Pval0.05[ ,"DelBeta"]) >= 0.10, ])
+dim(Pval <- NeuGranmerge[NeuGranmerge[ ,"P.Value"] < 0.00000009, ])
+dim(Pvaldelbeta0.10_NeuGran <- Pval[abs(Pval[ ,"DelBeta"]) >= 0.10, ])
+ReiNeuGran <- Pvaldelbeta0.10_NeuGran
+```
+
+```{r volc Reinius Gran New}
+dB<-0.10 #delta beta cutoff
+Pv<-0.00000009 #Pvalue cutoff
+#https://bmcgenomics.biomedcentral.com/articles/10.1186/s12864-019-5761-7
+
+data_volc <- NeuGranmerge
+volcano<-data.frame(Adjusted_Pvalue=data_volc$adj.P.Val,pval=data_volc$P.Value, Delta_Beta=data_volc$DelBeta)
+
+color3<-sapply(1:nrow(volcano), function(x) if(volcano$pval[x]<=Pv){
+  
+  if(abs(volcano$Delta_Beta[x])>dB){
+    
+    if(volcano$Delta_Beta[x]>dB){"Increased Methylation\n(with Potential Biological Impact)"}else{"Decreased Methylation\n (with Potential Biological Impact)"}
+    
+  }else{if(volcano$Delta_Beta[x]>0){"Increased Methylation"}else{"Decreased Methylation"}}}else{"Not Significantly Different"})
+
+volcano$Interesting_CpG3<-color3
+
+ggplot(volcano, aes(Delta_Beta, -log10(pval), color=Interesting_CpG3))+
+  geom_point(shape=19, size=1)+theme_bw()+
+  scale_color_manual(values=c(muted("#994d00", l=80, c=30),"#994d00",muted("#004c99", l=70, c=40),"#004c99","grey"))+
+  geom_vline(xintercept=c(-dB,dB), color="grey60")+
+  geom_hline(yintercept=-log10(Pv), color="grey60")+
+  ylab("P Value (-log10)")+
+  xlab("Delta Beta")+
+  xlim(-0.5, 0.5)+
+  theme(axis.text = element_text(size =10, color="black"),
+        axis.title = element_text(size =10),
+        legend.position="none" )+
+  ggtitle("Neu_Gran")
+ggsave(file=paste("Neu_Gran", "volcano.png", sep="_"), dpi=800, width=3, height=3, units="in")
+```
+
+#From our differential metylation analysis it is evident that Neutrophils from Reinius as basically as granulocytes so we will drop the neutrophils and also drop the Reinius eosinophils as no other datasets have them so not useful for any comparison
+
+# 3.0 Location of differentially methylated sites
+## adapted from Meg's
+```{r annotation}
+#load Magda annotation
+Price_anno <- read.csv("~/ckonwar/450K_Magda/450KMagdaAnnotation.csv",header=T)
+rownames(Price_anno) <- Price_anno$IlmnID
+#merge with Illumina annotation
+data("IlluminaHumanMethylation450kanno.ilmn12.hg19")
+Locations <- IlluminaHumanMethylation450kanno.ilmn12.hg19::Locations
+Manifest <- IlluminaHumanMethylation450kanno.ilmn12.hg19::Manifest
+Other <- IlluminaHumanMethylation450kanno.ilmn12.hg19::Other
+ProbeInfo450 <- cbind(Locations, Other)
+ProbeInfo450$IlmnID <- rownames(ProbeInfo450)
+
+anno <- left_join(as.data.frame(ProbeInfo450), Price_anno, by = "IlmnID")
+rownames(anno) <- anno$IlmnID
+head(rownames(anno))
+
+dim(anno.filt <- anno[rownames(CD4T),])
+
+anno.hits <- list("CD4T"=anno.filt[allcells[["CD4T"]],],
+                  "CD8T"=anno.filt[allcells[["CD8T"]],],
+                  "B"=anno.filt[allcells[["B"]],], 
+                  "NK"=anno.filt[allcells[["NK"]],],
+                  "Mono"=anno.filt[allcells[["Mono"]],],
+                  "Gran"=anno.filt[allcells[["Gran"]],])
+
+anno.hits_noGran <- list("CD4T"=anno.filt[allcells[["CD4T"]],],
+                         "CD8T"=anno.filt[allcells[["CD8T"]],],
+                         "B"=anno.filt[allcells[["B"]],], 
+                         "NK"=anno.filt[allcells[["NK"]],],
+                         "Mono"=anno.filt[allcells[["Mono"]],])
+
+
+
+```
+```{r CpG island no WB}
+islands<- data.frame(matrix(0, nrow=length(names(anno.hits)), ncol=4, dimnames=list(names(anno.hits), levels(anno$HIL_CpG_class))))
+for(i in names(anno.hits)){
+  islands[i,] <- table(anno.hits[[i]]$HIL_CpG_class)
+}
+## background islands
+isl.back <- table(anno.filt$HIL_CpG_class)/nrow(anno.filt)*100 
+
+islands.scale <- islands/rowSums(islands)*100
+
+islands.melt <- melt(cbind(cells=rownames(islands.scale), islands.scale))
+islands.melt$cells<- factor(islands.melt$cells, levels=c( "CD4T", "CD8T", "B", "NK", "Mono" , "Gran"))
+
+#assigning colors for cell types
+celltypeLabel <- islands.melt$cells
+celltypeLabel <- gsub("B","#39ccca", gsub("CD4T", "#0fb7fa", gsub("CD8T" , "#92dbf7", gsub("Gran", "#ad2a6c", gsub("Mono", "#e8a5c7", gsub("NK", "#64a4c4", celltypeLabel))))))
+
+#assigning colors for CpG island class
+
+ggplot(islands.melt, aes(variable, value, fill=cells))+
+  geom_bar(stat="identity", position="dodge")+
+  theme_bw()+scale_fill_manual(values = celltypeLabel)+
+  scale_x_discrete(name ="CpG island class")+
+  scale_y_continuous(name="Percentage of DM CpGs between cord and adult")+
+  theme(axis.text = element_text(size = 5, color="black"),
+        axis.title = element_text(size =8),
+        legend.position="right" )
+#ggsave(file=paste("islands.melt", "CpG_island.pdf", sep="_"), dpi=800, width=3, height=3, units="in")
+```
+
+
+```{r island GR no gran}
+####Now without granulocytes
+islands<- data.frame(matrix(0, nrow=length(names(anno.hits_noGran)), ncol=4, dimnames=list(names(anno.hits_noGran), levels(anno$HIL_CpG_class))))
+for(i in names(anno.hits_noGran)){
+  islands[i,] <- table(anno.hits_noGran[[i]]$HIL_CpG_class)
+}
+## background islands
+isl.back <- table(anno.filt$HIL_CpG_class)/nrow(anno.filt)*100 
+
+islands.scale <- islands/rowSums(islands)*100
+
+islands.melt <- melt(cbind(cells=rownames(islands.scale), islands.scale))
+islands.melt$variable <- factor(islands.melt$variable, levels=c( "HC", "IC", "ICshore", "LC"))
+
+# not assigning colors - Meg can choose
+ggplot(islands.melt, aes(cells, value, fill=variable))+
+  geom_bar(stat="identity", position="dodge")+
+  theme_bw()+
+  scale_x_discrete(name ="")+
+  scale_y_continuous(name="Percentage of DM CpGs between cord and adult")+
+  theme(axis.text = element_text(size = 8, color="black"),
+        axis.title = element_text(size =8),
+        legend.position="right" )
+ggsave(file=paste("islands.melt", "CpG_island_nogran.pdf", sep="_"), dpi=800, width=4.5, height=4.5, units="in")
+
+### UCSC refgene group
+
+group<- data.frame(matrix(0, nrow=length(names(anno.hits_noGran)), ncol=6, dimnames=list(names(anno.hits_noGran), c("1stExon",   "3'UTR",   "5'UTR",   "Body", "TSS1500",  "TSS200"))))
+
+for(i in names(anno.hits_noGran)){
+  
+  group[i,]<- table(unlist(c(unique(strsplit(as.character(anno.hits_noGran[[i]]$UCSC_RefGene_Group), ";")))))
+  
+}
+
+group.back<- table(unlist(c(unique(strsplit(as.character(anno.hits_noGran$UCSC_RefGene_Group), ";")))))/sum(table(unlist(c(unique(strsplit(as.character(anno.hits_noGran$UCSC_RefGene_Group), ";"))))))*100 
+
+group.scale <- group/rowSums(group)*100
+group.melt<- melt(cbind(cells=rownames(group.scale), group.scale))
+
+group.melt$variable <- as.factor(group.melt$variable)
+group.melt$variable <- revalue(group.melt$variable, c("X1stExon"="1stExon", "X3.UTR"="3'UTR", "X5.UTR"="5'UTR","Body"="Body","TSS1500"="TSS1500","TSS200"="TSS200"))
+
+ggplot(group.melt, aes(cells, value, fill=variable))+
+  geom_bar(stat="identity", position="dodge")+
+  theme_bw()+
+  scale_x_discrete(name ="Genomic region")+
+  scale_y_continuous(name="Percentage of DM CpGs between cord and adult")+
+  theme(axis.text = element_text(size = 8, color="black"),
+        axis.title = element_text(size =8),
+        legend.position="right" )
+ggsave(file=paste("group.melt", "GenomicRegion_noGran.pdf", sep="_"), dpi=800, width=4.5, height=4.5, units="in")
+```
+
+# 4.0 Cochran mantel test for significant enrichment of CpG island status
+```{r cochran mantel}
+load("~/KoborLab/kobor_space/cake/home/mjones/Cord blood/allcells_cordvsadulthits_island_classes.rdata") ## have the hits but need to make the non-hit tables!
+load("CD4T_adultvscord_toptable.rdata")
+cd4<- topt
+load("CD8T_adultvscord_toptable.rdata")
+cd8<- topt
+load("B_adultvscord_toptable.rdata")
+bcell<- topt
+load("NK_adultvscord_toptable.rdata")
+nk<- topt
+load("G_adultvscord_toptable.rdata")
+gran<- topt
+load("Mo_adultvscord_toptable.rdata")
+mono<- topt
+load("WB_adultvscord_toptable.rdata")
+wb<- topt
+load("MC_adultvscord_toptable.rdata")
+mc<- topt
+anno<- read.csv("~/KoborLab/kobor_space/cake/home/mjones/All_annotation.csv", header=T, row.names=1)
+anno.filt<- anno[rownames(cd4),]
+
+load("~/KoborLab/kobor_space/cake/home/mjones/Cord blood/mixed_cells_topt_hit_lists.rdata")
+load("~/KoborLab/kobor_space/cake/home/mjones/Cord blood/all_cells_topt_hit_lists.rdata")
+load("~/KoborLab/kobor_space/cake/home/mjones/Cord blood/fdata_allcells_adultvscord_hits.rdata")
+celltypes<- c("B", "CD4T", "CD8T", "G", "Mo", "NK", "WB", "MC")
+
+allcells<- c(venn, mix.list)
+str(allcells)
+
+anno.nonhits<- list("CD4T"=anno.filt[!rownames(anno.filt)%in%allcells[["CD4T"]],],
+                    "CD8T"=anno.filt[!rownames(anno.filt)%in%allcells[["CD8T"]],],
+                    "B"=anno.filt[!rownames(anno.filt)%in%allcells[["B"]],], 
+                    "NK"=anno.filt[!rownames(anno.filt)%in%allcells[["NK"]],],
+                    "Mo"=anno.filt[!rownames(anno.filt)%in%allcells[["Mo"]],],
+                    "G"=anno.filt[!rownames(anno.filt)%in%allcells[["G"]],],
+                    "MC"=anno.filt[!rownames(anno.filt)%in%allcells[["MC"]],],
+                    "WB"=anno.filt[!rownames(anno.filt)%in%allcells[["WB"]],] )
+
+
+save(anno.nonhits, file="fdata_allcells_adultvscord_nonhits.rdata")
+
+islands.nonhits<- data.frame(matrix(0, nrow=length(names(anno.nonhits)), ncol=4, dimnames=list(names(anno.nonhits), levels(anno$HIL_CpG_class))))
+for(i in names(anno.nonhits)){
+  islands.nonhits[i,]<- table(anno.nonhits[[i]]$HIL_CpG_class)
+}
+save(islands.nonhits, file="allcells_cordvsadultnonhits_island_classes.rdata")
+
+isl.arr<- array(NA, dim=c(2,4,8), dimnames=list(Site=c("DM", "Non-DM"), Class=colnames(islands), CellType=rownames(islands)))
+for (i in celltypes){
+  isl.arr["DM",,i]<- c(as.numeric(paste(islands[i,])))
+  isl.arr["Non-DM",,i]<- c(as.numeric(paste(islands.nonhits[i,])))
+}
+
+mantelhaen.test(isl.arr, 
+                alternative = "two.sided",
+                correct = TRUE, exact = FALSE, conf.level = 0.95) ##p<2.2e-16
+```
+
+  
