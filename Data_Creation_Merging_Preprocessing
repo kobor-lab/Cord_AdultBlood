@@ -1,0 +1,281 @@
+# 1.0 Create cord and adult blood datasets
+
+# 1.0a Adult datasets
+```{r adult datasets, results = "hide", warning = F, message = F, eval=F}
+# salas data
+hub <- ExperimentHub()
+query(hub, "FlowSorted.Blood.EPIC")
+FlowSorted.Blood.EPIC <- hub[["EH1136"]]
+class(FlowSorted.Blood.EPIC)
+MSet_Salas <- preprocessRaw(FlowSorted.Blood.EPIC) 
+dim(MSet_Salas)
+
+# Reinius data
+Rein <- FlowSorted.Blood.450k
+class(Rein)
+MSet_Rein <- preprocessRaw(Rein)
+dim(MSet_Rein)
+
+# combine the adult datasets
+adult.comb <- combineArrays(FlowSorted.Blood.EPIC, Rein,
+                            outType = "IlluminaHumanMethylation450k")
+```
+
+# 1.0b Cordblood datasets
+https://github.com/immunomethylomics/FlowSorted.CordBloodCombined.450k
+```{r cordblood datasets, results = "hide", warning = F, message = F, eval=F}
+hub <- ExperimentHub()
+query(hub, "FlowSorted.CordBloodCombined.450k")
+# This package includes a combination of four cell references for umbilical cord blood deconvolution using IlluminaHumanMethylation arrays 450K and EPIC
+FlowSorted.CordBloodCombined.450k <- hub[["EH2256"]]
+MSet_CordCombined <- preprocessRaw(FlowSorted.CordBloodCombined.450k) 
+dim(MSet_CordCombined)
+```
+
+# 1.0c Combine cord blood and adult
+```{r combine cord and adult, results = "hide", warning = F, message = F, eval=F}
+# combine the cord and adult datasets
+adultcord.comb <- combineArrays(adult.comb, FlowSorted.CordBloodCombined.450k,
+                                outType = "IlluminaHumanMethylation450k")
+
+saveRDS(adultcord.comb, "~/ckonwar/Blood/adultcord.comb.rds")
+```  
+
+# 2.0 Sample checks
+
+## 2.0a Control probes
+The 450k array contains several internal control probes that can be used to assess the quality control of different sample preparation steps (bisulfite conversion, hybridization, etc.). The values of these control probes are stored in the initial RGChannelSet and can be plotted by using the function controlStripPlot and by specifying the control probe type
+<br><br><br><br>
+  
+NOTE: Samples look ok
+```{r Control metrics, dpi=200}  
+# Christensen
+controlStripPlot(RGset_Christensen, controls = c("BISULFITE CONVERSION I",
+                                                 "BISULFITE CONVERSION II"))
+controlStripPlot(RGset_Christensen, controls = "HYBRIDIZATION")
+controlStripPlot(RGset_Christensen, controls = "STAINING")
+controlStripPlot(RGset_Christensen, controls = "EXTENSION")
+controlStripPlot(RGset_Christensen, controls = "TARGET REMOVAL")
+
+# Reinius
+controlStripPlot(RGset_Reinius, controls = c("BISULFITE CONVERSION I",
+                                             "BISULFITE CONVERSION II"))
+controlStripPlot(RGset_Reinius, controls = "HYBRIDIZATION")
+controlStripPlot(RGset_Reinius, controls = "STAINING")
+controlStripPlot(RGset_Reinius, controls = "EXTENSION")
+controlStripPlot(RGset_Reinius, controls = "TARGET REMOVAL")
+
+# Bakulski
+controlStripPlot(RGset_Bakulski, controls = c("BISULFITE CONVERSION I",
+                                              "BISULFITE CONVERSION II"))
+controlStripPlot(RGset_Bakulski, controls = "HYBRIDIZATION")
+controlStripPlot(RGset_Bakulski, controls = "STAINING")
+controlStripPlot(RGset_Bakulski, controls = "EXTENSION")
+controlStripPlot(RGset_Bakulski, controls = "TARGET REMOVAL")
+
+# Gervin
+controlStripPlot(RGset_Gervin, controls = c("BISULFITE CONVERSION I",
+                                            "BISULFITE CONVERSION II"))
+controlStripPlot(RGset_Gervin, controls = "HYBRIDIZATION")
+controlStripPlot(RGset_Gervin, controls = "STAINING")
+controlStripPlot(RGset_Gervin, controls = "EXTENSION")
+controlStripPlot(RGset_Gervin, controls = "TARGET REMOVAL")
+
+# deGoede
+controlStripPlot(RGset_deGoede, controls = c("BISULFITE CONVERSION I",
+                                             "BISULFITE CONVERSION II"))
+controlStripPlot(RGset_deGoede, controls = "HYBRIDIZATION")
+controlStripPlot(RGset_deGoede, controls = "STAINING")
+controlStripPlot(RGset_deGoede, controls = "EXTENSION")
+controlStripPlot(RGset_deGoede, controls = "TARGET REMOVAL")
+
+# Lin
+controlStripPlot(RGset_Lin, controls = c("BISULFITE CONVERSION I",
+                                         "BISULFITE CONVERSION II"))
+controlStripPlot(RGset_Lin, controls = "HYBRIDIZATION")
+controlStripPlot(RGset_Lin, controls = "STAINING")
+controlStripPlot(RGset_Lin, controls = "EXTENSION")
+controlStripPlot(RGset_Lin, controls = "TARGET REMOVAL")
+```
+
+## 2.0b Average intensity
+
+NOTE: Samples look ok overall 
+```{r intensity, dpi=200}
+green <- getGreen(adultcord.comb)
+red <- getRed(adultcord.comb)
+greenred <- green + red
+
+# add to sampleInfo
+pDat <-pDat %>% mutate(Average_intensity = colMeans(greenred))
+
+pDat %>% 
+  mutate(Sample_Name = factor(as.character(rownames(pDat)), levels = rownames(pDat))) %>%
+  ggplot(aes(x = Sample_Name, y = Average_intensity, fill = Study)) +
+  geom_point(shape = 21, col = 'black', size = 3.5, alpha=0.8) + theme_classic() +
+  theme(axis.text.x = element_blank(),
+        axis.text.y=element_text(size=14),
+        axis.title.x=element_text(size=15, vjust=-0.3)) +
+  geom_hline(yintercept = mean(pDat$Average_intensity) - 2*sd(pDat$Average_intensity),
+             linetype = 'dashed', col = 'grey')+
+  geom_hline(yintercept = mean(pDat$Average_intensity) + 2*sd(pDat$Average_intensity),
+             linetype = 'dashed', col = 'grey') +
+  scale_y_continuous(limits = c(0, 15000)) +
+  labs(x = 'Samples')
+```
+
+## 2.0b Sex check
+### Cluster all samples based on sex
+```{r cluster all,dpi=200, fig.height=18, fig.width=15}
+sexLabel <- pDat$Sex
+sexLabel <-gsub("M", "Blue", gsub("F", "Pink", sexLabel))
+
+# subset beta values to XY probes
+sexBetas <- getBeta(adultcord.comb)
+sexBetas <- sexBetas[which(rownames(sexBetas) %in% rownames(sexProbeIDs)),]
+dim(sexBetas)
+
+# plot
+distSex <- dist(t(sexBetas))
+clustSex <- hclust(distSex)
+plot(as.phylo(clustSex), lab4ut="axial", type = "unrooted", edge.width=0.5, cex=1, tip.color=sexLabel)
+
+# perfect
+```
+
+## 2.0d Bad probes 
+The negative controls on the array can be used to detect outlying samples via the detection p-values, which measure how likely it is a sample’s signal differs from the background. Signals that do not differ substantially (default: p<0.01) are removed. detectionP() from minfi is used to determine this.
+<br><br><br><br>
+  NOTE: Samples look ok
+```{r detection pvalue}
+# get detp matrix
+detp <- minfi::detectionP(adultcord.comb)
+# detp p > 0.01
+x <- colSums(detp > 0.01)
+all(names(x)==(rownames(pDat)))
+pDat$detP_01_minfi <- x
+
+# plot
+pDat %>% 
+  arrange(Study, detP_01_minfi) %>%
+  mutate(Sample_Name = factor(as.character(rownames(pDat)), levels = rownames(pDat))) %>%
+  ggplot(aes(x = Sample_Name, y = detP_01_minfi, fill = Study))+
+  geom_point(shape = 21, col = 'black', size = 3.5, alpha=0.8) + 
+  labs(x = 'Samples', y ='',  title = '# of samples with bad detective pvalue probes p >0.01')+
+  geom_hline(yintercept = 0.01*nrow(detp), linetype ='dashed', color = 'black') +
+  geom_text(aes(x = 0, y = 0.01*nrow(detp)),
+            label = '1%', vjust = -0.5, hjust = -0.5, color = 'black') +
+  scale_y_continuous(limits = c(0, 10000), breaks = seq(0,10000, 1000)) +
+  theme_classic()+
+  theme(axis.text.x = element_blank(), 
+        axis.text.y=element_text(size=14),
+        axis.title.x=element_text(size=15, vjust=-0.3))
+```
+
+# 3.0 Normalization
+
+NOTE: Type 1 and type 2 distributions loook similar enough
+```{r with noob, eval=F}
+#need to be done once takes a lot of time
+#perform noob first to correct for background noise and dye-bias.
+system.time(
+  noob <- preprocessNoob(adultcord.comb)
+)
+
+system.time(
+  bmiqnoob <- BMIQ(noob, nfit=100000)
+) #default for nfit is 5000 which is the number of probes of a given design type to use for the fitting
+
+saveRDS(bmiqnoob, file= "~/ckonwar/Blood/bmiqnoob.rds")
+```
+
+```{r plot after and before bmiq}
+betas <- getBeta(adultcord.comb)
+GRset <- mapToGenome(adultcord.comb)
+annotation <- getAnnotation(GRset)
+dim(type_1 <- subset(annotation, annotation$Type == "I"))
+dim(type_2 <- subset(annotation, annotation$Type == "II"))
+dim(type_1beforebetas <- betas[rownames(betas)%in%rownames(type_1),])
+dim(type_2beforebetas <- betas[rownames(betas)%in%rownames(type_2),])
+bmiqnoob <- readRDS("~/ckonwar/Blood/bmiqnoob.rds")
+dim(type_1afterbetas <- bmiqnoob[rownames(bmiqnoob)%in%rownames(type_1),])
+dim(type_2afterbetas <- bmiqnoob[rownames(bmiqnoob)%in%rownames(type_2),])
+
+#bmiq
+plot(c(0, 1), c(0, 14), xlab = "Beta values", ylab = "Density", main = "")
+lines(density(na.omit(type_1beforebetas)),col="#665e5a",lty = 1, lwd = 2)
+lines(density(na.omit(type_2beforebetas)),col = "#cc6333", lty = 1,lwd = 2)
+lines(density(na.omit(type_1afterbetas)),col="#665e5a",lty = 2, lwd = 2)
+lines(density(na.omit(type_2afterbetas)),col = "#cc6333", lty = 2,lwd = 2)
+legend("top", inset=.05, cex=1.0, c("Before: Type 1","Before: Type 2", "Norm: Type 1", "Norm: Type 2"), col=c("#665e5a","#cc6333","#665e5a","#cc6333"), lty=c(1,1,2,2), horiz=FALSE)
+```
+# 5.0 Probe filtering
+
+## 5.0a Polymorphic probes
+Taken from the package vignette There is a function in minfi that provides a simple interface for the removal of probes where common SNPs may affect the CpG. You can either remove all probes affected by SNPs (default), or only those with minor allele frequencies greater than a specified value.
+```{r polymorphic}
+# remove probes with SNPs at CpG site
+GRset <- mapToGenome(adultcord.comb)
+# The function `dropLociWithSnps` allows to drop the corresponding probes. Here is an example where we drop the probes containing a SNP at the CpG interrogation and/or at the single nucleotide extension, for any minor allele frequency
+Polymorphic <- dropLociWithSnps(GRset, snps=c("SBE","CpG"), maf=0)
+head(rownames(Polymorphic))
+dim(Polymorphic)
+
+#drop these from the bmiqnoob filtered
+dim(bmiqnoob)
+dim(betas_filt <- bmiqnoob[rownames(bmiqnoob)%in%rownames(Polymorphic),])
+```
+
+## 5.0b XY probes
+```{r sex probes}
+# get the probe chromosomal locations from manifest
+data(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+data(Locations)
+dim(sexProbeIDs <- Locations[which(Locations$chr == "chrY" | Locations$chr == "chrX"), ]) %>% as.data.frame() 
+# subset beta values to XY probes
+dim(sexBetas <- betas_filt[which(rownames(betas_filt) %in% rownames(sexProbeIDs)),])
+#remove XY probes
+betas_filt <- betas_filt[!(rownames(betas_filt)%in%rownames(sexBetas)),]
+dim(betas_filt)
+```
+
+## 5.0c Crosshybridizing probes
+```{r crosshybridizing and polymorphic}
+Magda_450K <- read.csv("~/ckonwar/450K_Magda/450KMagdaAnnotation.csv")
+colnames(Magda_450K)
+dim(Crossreactive_MagdaDatXY <- Magda_450K[grep("YES",Magda_450K$XY_Hits),])
+dim(Crossreactive_MagdaDatAuto <- Magda_450K[grep("YES",Magda_450K$Autosomal_Hits),])
+Cross_MagdaXY <- betas_filt[which(rownames(betas_filt)%in% (Crossreactive_MagdaDatXY$IlmnID)),]
+Cross_MagdaAuto <- betas_filt[which(rownames(betas_filt)%in% (Crossreactive_MagdaDatAuto$IlmnID)),]
+dim(betas_filt <- betas_filt[!(rownames(betas_filt)%in% (Crossreactive_MagdaDatXY$IlmnID)),])
+dim(betas_filt <- betas_filt[!(rownames(betas_filt)%in% (Crossreactive_MagdaDatAuto$IlmnID)),])
+```
+
+## 5.0d Bad detection p value probes
+
+Detection p values indicate whether a particular methylation intensity is statistically different from the average intensity over the negative control probes/background. P values which are greater than 0.01 are considered poor quality measurements.
+
+```{r bad probes}
+# create a dummy matrix
+bad_probes <- matrix(data = F, nrow = nrow(detp), ncol = ncol(detp),
+                     dimnames = list(rownames(detp), colnames(detp))) %>% as.data.frame
+
+# now let us put 'TRUE' where detp > 0.01
+bad_probes[detp > 0.01] <- T
+
+#Number of probes that had a significant amount of bad performing probes:
+n <- ncol(adultcord.comb)
+bad_probes_count <- rowSums(bad_probes)
+sum(bad_probes_count > 0.010*n)
+sum(bad_probes_count > 0.025*n)
+sum(bad_probes_count > 0.05*n)
+
+# bad probes, remove if > 5% missing
+probe_anno <- tibble(probe_ID = rownames(detp)) %>%
+  mutate(number_bad_probes = bad_probes_count)
+probe_bad <- probe_anno %>% filter(number_bad_probes > 0.05*n)  %>% pull(probe_ID)  %>%  as.data.frame() 
+
+#remove these probes 
+dim(betas_filt <- betas_filt[!(rownames(betas_filt)%in%(probe_bad$.)),])
+saveRDS(betas_filt , "~/ckonwar/Blood/betas_filt.rds")
+```
