@@ -405,5 +405,87 @@ mantelhaen.test(isl.arr,
                 alternative = "two.sided",
                 correct = TRUE, exact = FALSE, conf.level = 0.95) ##p<2.2e-16
 ```
+# 5.0 GoMeth enrichment for biological process
+```{r gometh}
+#annotation
+anno = minfi::getAnnotation(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+#significant CpGs-must be character
+significant_cpgs <- as.character(Pvaldelbeta0.10_Mono$CpG)
+
+#all CpGs-must be character
+all_cpgs <- as.character(Monomerge$CpG)
+
+#
+go_results_no_prior <- missMethyl::gometh(sig.cpg = significant_cpgs, all.cpg = all_cpgs, array.type = "450K",collection = "GO", prior.prob = FALSE, anno = anno)
+
+dim(go_results_no_prior_BP <- subset(go_results_no_prior, go_results_no_prior$ONTOLOGY == "BP"))
+dim(go_results_no_prior_BP_N100 <- subset(go_results_no_prior_BP, go_results_no_prior_BP$N >100))
+dim(go_results_no_prior_BP_N100_FDR <- subset(go_results_no_prior_BP_N100, go_results_no_prior_BP_N100$FDR < 0.01))
+    
+    
+dim(go_results_no_prior_MF <- subset(go_results_no_prior, go_results_no_prior$ONTOLOGY == "MF"))
+dim(go_results_no_prior_MF_N100 <- subset(go_results_no_prior_MF, go_results_no_prior_MF$N >100))
+dim(go_results_no_prior_MF_N100_FDR <- subset(go_results_no_prior_MF_N100, go_results_no_prior_MF_N100$FDR < 0.01))
+```
+# 6.0 ChromHMM analysis
+```{r chromHMM}
+load("~/KoborLab/kobor_space/ckonwar/Blood/Monomerge.RData")
+beta <- Monomerge #all the cpgs tested in the model - just need rownames
+rownames(beta) <- beta$CpG
+# 450K annotation
+anno = minfi::getAnnotation(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+anno <- anno %>% as.data.frame()
+
+# chromHMM
+dim(ChromHMM_anno_filt <- readRDS("~/KoborLab/kobor_space/fatimaf/Enrichment/ChromHMM/ChromHMM_anno_filt.rds")) # load chromHMM annotation- this is the background for the BLOOD study that I am working with Meg. I had filtered this from the dataframe NG had created for EPIC
+dim(Chrom_df <- ChromHMM_anno_filt[(ChromHMM_anno_filt$CpG)%in%rownames(beta),c("CpG","E062_Mononuclear_State")]) # You want to look through the colnames and pick a cell type that fit with your samples (e.g. PBMC) for the second column!
+colnames(Chrom_df) <- c("Probe_ID", "region")
+
+# This part creates an annotation that can be put into missmethyl
+ChromHMMset <- lapply(unique(Chrom_df$region), function(x){
+  cpgs <- Chrom_df$Probe_ID[Chrom_df$region == x]
+  id <- getMappedEntrezIDs(sig.cpg=cpgs, array.type = "450K", anno = anno)
+  return(id$sig.eg)
+})
+names(ChromHMMset) <- unique(Chrom_df$region)
+
+# Monocytes
+load("~/KoborLab/kobor_space/ckonwar/Blood/hits/Pvaldelbeta0.10_Mono.RData")
+hits <- Pvaldelbeta0.10_Mono
+rownames(hits) <- hits$CpG
+
+head(rownames(hits))
+head(rownames(beta))
+  
+pathChromHMM <- gsameth(sig.cpg = rownames(hits), # Change this to a vector of names of significantly differentially methylated CpGs
+                        all.cpg = rownames(beta), # Change this to all the CpGs you are testing
+                        collection = ChromHMMset, 
+                        array.type = "450K", 
+                        anno = anno) %>% .[order(.$FDR), ]
+pathChromHMM$Term <- rownames(pathChromHMM) %>% 
+  gsub("1_TssA", "Active TSS", .) %>%
+  gsub("2_TssFlnk", "Flanking TSS", .) %>% 
+  gsub("3_TssFlnkU", "Flanking TSS Upstream", .) %>% 
+  gsub("4_TssFlnkD", "Flanking TSS Downstream", .) %>% 
+  gsub("5_Tx", "Strong Transcription", .) %>% 
+  gsub("6_TxWk", "Weak Transcription", .) %>% 
+  gsub("7_EnhG1", "Genic Enhancer 1", .) %>% 
+  gsub("8_EnhG2", "Genic Enhancer 2", .) %>% 
+  gsub("9_EnhA1", "Active Enhancer 1", .) %>% 
+  gsub("10_EnhA2", "Active Enhancer 2", .) %>% 
+  gsub("11_EnhWk", "Weak Enhancer", .) %>% 
+  gsub("12_ZNF/Rpts", "ZNF genes & repeats", .) %>% 
+  gsub("13_Het", "Heterochromatin", .) %>% 
+  gsub("14_TssBiv", "Bivalent/Poised TSS", .) %>% 
+  gsub("15_EnhBiv", "Bivalent Enhancer", .) %>% 
+  gsub("16_ReprPC", "Repressed PolyComb", .) %>% 
+  gsub("17_ReprPCWk", "Weak Repressed PolyComb", .) %>% 
+  gsub("18_Quies", "	Quiescent/Low", .) 
+pathChromHMM$log10Padj <- log10(pathChromHMM$FDR)*-1
+ChromHMM_Gran <- pathChromHMM
+```
+
+
 
   
